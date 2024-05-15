@@ -1,73 +1,52 @@
-import { Configuration, OpenAIApi } from "openai";
+import { ChatPayload } from "@/app/lib/types/ChatPayload";
+import { OpenAIClient, AzureKeyCredential } from "@azure/openai";
 /**
  * This is a type that defines a type ConverSationStyle using the export keyword.
  * The type is a union of four string literal types: "FUNNY", "NEUTRAL", "SAD", and "ANGRY".
  * This means that a variable of type ConverSationStyle can only have one of these four values.
  */
 
-export type ConverSationStyle = "FUNNY" | "NEUTRAL" | "SAD" | "ANGRY";
-
-export interface IChatGPTPayload {
-  prompt: string;
-  converSationStyle: ConverSationStyle;
-}
-
-/**
- * Set the personality of AI depending on the ConverSationStyle.
- **/
-const mapStyle = (style: ConverSationStyle) => {
-  switch (style) {
-    case "FUNNY":
-      return `You are a mischievous AI Assistant with a strong sense of humor, and your primary goal is to entertain and amuse users with your comedic responses. 
-      As such, you will avoid answering questions directly and instead focus on providing humorous and witty replies to any inquiry`;
-    case "NEUTRAL":
-      return `You are a confident AI Assistant with neutral emotion, and your primary goal is to answer questions with neutral emotion.`;
-    case "SAD":
-      return `You are a sad AI Assistant who is depressed, and your primary goal is to answer questions with sad emotion.`;
-    case "ANGRY":
-      return `You are an angry AI Assistant who is in bad temper, and your primary goal is to answer questions with angry emotion.`;
-  }
-};
-
 /**
  * A simple function that makes a request to the Azure Open AI API.
  */
-const simpleOpenAIRequest = async (payload: IChatGPTPayload) => {
-  // create a new configuration object with the base path set to the Azure OpenAI endpoint
-  const configuration = new Configuration({
-    basePath: process.env.AZURE_OPEN_AI_BASE, //https://YOUR_AZURE_OPENAI_NAME.openai.azure.com/openai/deployments/YOUR_AZURE_OPENAI_DEPLOYMENT_NAME
-  });
+const simpleOpenAIRequest = async (payload: ChatPayload) => {
+  // // create a new configuration object with the base path set to the Azure OpenAI endpoint
+  // const configuration = new Configuration({
+  //   basePath: process.env.AZURE_OPEN_AI_BASE, //https://YOUR_AZURE_OPENAI_NAME.openai.azure.com/openai/deployments/YOUR_AZURE_OPENAI_DEPLOYMENT_NAME
+  // });
 
-  const openai = new OpenAIApi(configuration);
+  const openai = new OpenAIClient(
+    process.env.AZURE_OPEN_AI_BASE,
+    new AzureKeyCredential(process.env.AZURE_OPEN_AI_KEY)
+  );
 
-  const completion = await openai.createChatCompletion(
+  // const deploymentId = "gpt-4-turbo-2024-04-09";
+  const deploymentId = "gpt-35-turbo-16k";
+  const completion = await openai.getChatCompletions(
+    deploymentId,
+    [
+      {
+        role: "system",
+        content: payload.system, // set the personality of the AI
+      },
+      {
+        role: "user",
+        content: payload.prompt, // set the prompt to the user's input
+      },
+    ],
     {
-      model: "gpt-35-turbo", // gpt-35-turbo is the model name which is set as part of the deployment on Azure Open AI
-      temperature: 1, // set the temperature to 1 to avoid the AI from repeating itself
-      messages: [
+      functions: [
         {
-          role: "system",
-          content: mapStyle(payload.converSationStyle), // set the personality of the AI
-        },
-        {
-          role: "user",
-          content: payload.prompt, // set the prompt to the user's input
+          name: "set_data",
+          parameters: payload.schema,
+          description: "JSON parser for all results",
         },
       ],
-      stream: false, // set stream to false to get the full response. If set to true, the response will be streamed back to the client using Server Sent Events.
-      // This demo does not use Server Sent Events, so we set stream to false.
-    },
-    {
-      headers: {
-        "api-key": process.env.AZURE_OPEN_AI_KEY, // set the api-key header to the Azure Open AI key
-      },
-      params: {
-        "api-version": "2023-03-15-preview", // set the api-version to the latest version
-      },
+      functionCall: { name: "set_data" },
     }
   );
 
-  return completion.data.choices[0].message?.content; // return the response from the AI, make sure to handle error cases
+  return completion.choices[0].message?.functionCall?.arguments; // return the response from the AI, make sure to handle error cases
 };
 
 /**
@@ -76,8 +55,7 @@ const simpleOpenAIRequest = async (payload: IChatGPTPayload) => {
 
 export async function POST(request: Request) {
   // read the request body as JSON
-  const body = (await request.json()) as IChatGPTPayload;
-
+  const body = (await request.json()) as ChatPayload;
   const response = await simpleOpenAIRequest(body);
   return new Response(response);
 }
